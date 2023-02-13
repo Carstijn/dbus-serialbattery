@@ -5,8 +5,8 @@ from struct import *
 
 
 class Sinowealth(Battery):
-    def __init__(self, port, baud, address):
-        super(Sinowealth, self).__init__(port, baud, address)
+    def __init__(self, port, baud):
+        super(Sinowealth, self).__init__(port, baud)
         self.poll_interval = 2000
         self.type = self.BATTERYTYPE
 
@@ -92,7 +92,7 @@ class Sinowealth(Battery):
         )
 
         logger.info(">>> INFO: Pack status [0]: %s, Pack status [1]: %s", format(status_data[0], '08b'), format(status_data[1], '08b'))
-        logger.info(">>> INFO: Discharge fet: %s, charge fet: %s, Balancing: %s", self.discharge_fet, self.charge_fet, self.balancing)
+        logger.info(">>> INFO: Discharge fet: %s, charge fet: %s", self.discharge_fet, self.charge_fet)
         
         if self.discharge_fet is False and self.charge_fet is False:
           self.protection.internal_failure = 2
@@ -100,7 +100,9 @@ class Sinowealth(Battery):
           self.protection.internal_failure = 0
         
         if self.cell_count is None:
-            self.read_pack_config_data()
+            pack_config = self.read_pack_config_data()
+            if pack_config is False:
+                return False
         return True
 
     def read_battery_status(self):
@@ -136,7 +138,6 @@ class Sinowealth(Battery):
         self.protection.temp_low_discharge = 2 if bool(battery_status[0]>>3 & int(1)) else 0 # UTD
         
         logger.info(">>> INFO: Battery status [0]: %s, Battery status [1]: %s", format(battery_status[0], '08b'), format(battery_status[1], '08b'))
-                
         return True
 
     def read_soc(self):
