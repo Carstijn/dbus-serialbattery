@@ -35,7 +35,7 @@ class Sinowealth(Battery):
     def test_connection(self):
         result = False
         try:
-            result = self.read_status_data()
+            result = self.read_pack_status()
             result = result and self.read_remaining_capacity()
             result = result and self.read_pack_config_data()
         except:
@@ -64,7 +64,7 @@ class Sinowealth(Battery):
 
     def refresh_data(self):
         result = self.read_soc()
-        result = result and self.read_status_data()
+        result = result and self.read_pack_status()
         result = result and self.read_battery_status()
         result = result and self.read_pack_voltage()
         result = result and self.read_pack_current()
@@ -74,7 +74,7 @@ class Sinowealth(Battery):
         result = result and self.read_cycle_count()
         return result
 
-    def read_status_data(self):
+    def read_pack_status(self):
         status_data = self.read_serial_data_sinowealth(self.command_status)
         # check if connection success
         if status_data is False:
@@ -91,6 +91,14 @@ class Sinowealth(Battery):
             self.charge_fet,
         )
 
+        logger.info(">>> INFO: Pack status [0]: %s, Pack status [1]: %s", format(status_data[0], '08b'), format(status_data[1], '08b'))
+        logger.info(">>> INFO: Discharge fet: %s, charge fet: %s, Balancing: %s", self.discharge_fet, self.charge_fet, self.balancing)
+        
+        if self.discharge_fet is False and self.charge_fet is False:
+          self.protection.internal_failure = 2
+        else:
+          self.protection.internal_failure = 0
+        
         if self.cell_count is None:
             self.read_pack_config_data()
         return True
@@ -104,30 +112,31 @@ class Sinowealth(Battery):
         # Battery status command layout (from screenshot)
         # [0]     -       CTO     AFE_SC  AFE_OV  UTD     UTC     OTD     OTC
         # [1]     -       -       -       -       OCD     OC      UV      OV
-        self.protection.voltage_high = (
-            2 if bool(battery_status[1] & int(1)) else 0
-        )  # OV
-        self.protection.voltage_low = (
-            2 if bool(battery_status[1] >> 1 & int(1)) else 0
-        )  # UV
-        self.protection.current_over = (
-            2
-            if bool(battery_status[1] >> 2 & int(1))
-            or bool(battery_status[1] >> 3 & int(1))
-            else 0
-        )  # OC (OCC?)| OCD
-        self.protection.temp_high_charge = (
-            2 if bool(battery_status[0] & int(1)) else 0
-        )  # OTC
-        self.protection.temp_high_discharge = (
-            2 if bool(battery_status[0] >> 1 & int(1)) else 0
-        )  # OTD
-        self.protection.temp_low_charge = (
-            2 if bool(battery_status[0] >> 2 & int(1)) else 0
-        )  # UTC
-        self.protection.temp_low_discharge = (
-            2 if bool(battery_status[0] >> 3 & int(1)) else 0
-        )  # UTD
+        
+        # check Overvoltage flag (OV), warning if charge fet is still enabled, else error
+        if bool(battery_status[1] & int(1)) and self.charge_fet is False: #OV
+          self.protection.voltage_high = 2 
+        elif bool(battery_status[1] & int(1)):
+          self.protection.voltage_high = 1
+        else:
+          self.protection.voltage_high = 0
+          
+        # check Undervoltage flag (UV), warning if discharge fet is still enabled, else error
+        if bool(battery_status[1]>>1 & int(1)) and self.charge_fet is False: #UV
+          self.protection.voltage_low = 2
+        elif bool(battery_status[1]>>1 & int(1)):
+          self.protection.voltage_low = 1
+        else:
+          self.protection.voltage_low = 0
+          
+        self.protection.current_over = 2 if bool(battery_status[1]>>2 & int(1)) or bool(battery_status[1]>>3 & int(1)) else 0 # OC (OCC?)| OCD
+        self.protection.temp_high_charge = 2 if bool(battery_status[0] & int(1)) else 0 # OTC
+        self.protection.temp_high_discharge = 2 if bool(battery_status[0]>>1 & int(1)) else 0 # OTD
+        self.protection.temp_low_charge = 2 if bool(battery_status[0]>>2 & int(1)) else 0 # UTC
+        self.protection.temp_low_discharge = 2 if bool(battery_status[0]>>3 & int(1)) else 0 # UTD
+        
+        logger.info(">>> INFO: Battery status [0]: %s, Battery status [1]: %s", format(battery_status[0], '08b'), format(battery_status[1], '08b'))
+                
         return True
 
     def read_soc(self):
@@ -140,7 +149,6 @@ class Sinowealth(Battery):
         return True
 
     def read_cycle_count(self):
-        # TODO: cyclecount does not match cycles in the app
         cycle_count = self.read_serial_data_sinowealth(self.command_cycle_count)
         # check if connection success
         if cycle_count is False:
